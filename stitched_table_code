@@ -1,0 +1,244 @@
+CREATE OR REPLACE TABLE ecomData.ecom_Table_1a as 
+Select *, totaltransactionrevenue/total_purchasevisits as avg_order_value from
+(
+Select * ,
+sum(productQuantity_Referral + productQuantity_Organic_Search+productQuantity_Affiliates+ productQuantity_Direct+ productQuantity_Social  +productQuantity_Paid_Search +  productQuantity_Display) as total_transaction_quantity,
+(totaltransactionrevenue_Referral + totaltransactionrevenue_Organic_Search +  totaltransactionrevenue_Affiliates +  totaltransactionrevenue_Direct +  totaltransactionrevenue_Social +  totaltransactionrevenue_Paid_Search + totaltransactionrevenue_Display) as totaltransactionrevenue,
+sum(purchaseVisits_Referral+  purchaseVisits_Organic_Search+  purchaseVisits_Affiliates+  purchaseVisits_Direct+  purchaseVisits_Social+  purchaseVisits_Paid_Search+ purchaseVisits_Display) as total_purchaseVisits,
+sum(checkoutVisits_Referral+  checkoutVisits_Organic_Search+  checkoutVisits_Affiliates+  checkoutVisits_Direct+  checkoutVisits_Social+  checkoutVisits_Paid_Search+ checkoutVisits_Display) as total_checkoutVisits,
+sum(addToCartVisits_Referral+ addToCartVisits_Organic_Search+ addToCartVisits_Affiliates+ addToCartVisits_Direct+ addToCartVisits_Social+ addToCartVisits_Paid_Search+  addToCartVisits_Display) as total_addToCartVisits,
+sum(productDetailsVisits_Referral+  productDetailsVisits_Organic_Search+  productDetailsVisits_Affiliates+  productDetailsVisits_Direct+  productDetailsVisits_Social+  productDetailsVisits_Paid_Search+ productDetailsVisits_Display) as total_productDetailsVisits,
+sum(productPageVisits_Referral+ productPageVisits_Organic_Search+ productPageVisits_Affiliates+ productPageVisits_Direct+ productPageVisits_Social+ productPageVisits_Paid_Search+  productPageVisits_Display) as productPageVisits,
+
+from(
+WITH subquery1 as(
+  SELECT distinct  date,  fullvisitorid,
+  count(distinct visitid) as total_visits,  sum(pageviews) as total_pageviews,  sum(bounces) as total_bounces
+  FROM
+  (
+  SELECT distinct  date,  channelGrouping,  fullvisitorid,  visitStartTime,  visitid,  visitnumber,  totals.visits,  totals.pageviews,  totals.bounces, totals.transactionrevenue,  Min(visitnumber) OVER(PARTITION BY fullvisitorid) AS min_visitnumber,  Max(visitnumber) OVER(PARTITION BY fullvisitorid) AS max_visitnumber,
+  FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`,  UNNEST (hits) hits, UNNEST (hits.product) product
+  WHERE totals.visits = 1 and cast(date as string) like "%20170103%" group by 1,2,3,4,5,6,7,8,9,10 order by 3,4,5    
+  ) group by 1,2 order by 1,2
+),
+
+subquery2 as(
+  SELECT * FROM(
+  SELECT distinct  date,  fullvisitorid,
+  case when visitnumber = min_visitnumber then channelgrouping else null end as first_touch_channel,
+  case when visitnumber = min_visitnumber then pageviews else null end as first_touch_channel_pv,
+
+  FROM
+  (
+  SELECT distinct  date,    channelGrouping,    fullvisitorid,  visitnumber,  Min(visitnumber) OVER(PARTITION BY fullvisitorid) AS min_visitnumber,  
+  Max(visitnumber) OVER(PARTITION BY fullvisitorid) AS max_visitnumber,totals.pageviews
+  FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+  WHERE cast(date as string) like "%20170103%" group by 1,2,3,4,7 order by 3,4,5    
+  ) group by 1,2,3,4 order by 1,2) WHERE first_touch_channel is not null order by fullvisitorid
+),
+
+subquery3 as(
+  SELECT * FROM(
+  SELECT distinct  date,  fullvisitorid,
+  case when visitnumber = max_visitnumber then channelgrouping else null end as last_touch_channel,
+  case when visitnumber = max_visitnumber then pageviews else null end as last_touch_channel_pv,
+  
+  FROM
+  (
+  SELECT distinct  date,    channelGrouping,    fullvisitorid,  visitnumber,  Min(visitnumber) OVER(PARTITION BY fullvisitorid) AS min_visitnumber,  
+  Max(visitnumber) OVER(PARTITION BY fullvisitorid) AS max_visitnumber,totals.pageviews
+  FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+  WHERE cast(date as string) like "%20170103%" group by 1,2,3,4,7 order by 3,4,5    
+  ) group by 1,2,3,4 order by 1,2) WHERE last_touch_channel is not null
+),
+
+subquery4 as(
+SELECT * FROM(
+SELECT distinct fullvisitorid,
+case when visitnumber = min_visitnumber then pagePath else null end as first_channel_entrancepagePath,
+case when visitnumber = min_visitnumber then pageTitle else null end as first_channel_entrancepageTitle,
+FROM
+(
+SELECT DISTINCT fullvisitorid,visitid,visitnumber,hits.isEntrance, hits.page.pagePath, hits.page.pageTitle,
+Min(visitnumber) OVER(PARTITION BY fullvisitorid) AS min_visitnumber,  
+Max(visitnumber) OVER(PARTITION BY fullvisitorid) AS max_visitnumber,
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) as hits
+WHERE cast(date as string) like "%20170103%" and isEntrance is not null group by 1,2,3,4,5,6 order by 3
+)) where first_channel_entrancepagePath is not null
+),
+
+subquery5 as(
+SELECT * FROM(
+SELECT distinct fullvisitorid,
+case when visitnumber = max_visitnumber then pagePath else null end as last_channel_entrancepagePath,
+case when visitnumber = max_visitnumber then pageTitle else null end as last_channel_entrancepageTitle,
+FROM
+(
+SELECT DISTINCT fullvisitorid,visitid,visitnumber,hits.isEntrance, hits.page.pagePath, hits.page.pageTitle,
+Min(visitnumber) OVER(PARTITION BY fullvisitorid) AS min_visitnumber,  
+Max(visitnumber) OVER(PARTITION BY fullvisitorid) AS max_visitnumber,
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) as hits
+WHERE cast(date as string) like "%20170103%" and isEntrance is not null group by 1,2,3,4,5,6 order by 3
+)) where last_channel_entrancepagePath is not null
+),
+
+subquery6 as(
+SELECT * FROM
+(
+SELECT distinct
+  fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+  FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+  WHERE cast(date as string) like "%20170103%" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS visits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery7 as (
+SELECT * FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "1" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS productPageVisits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery8 as (
+SELECT * FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "2" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS productDetailsVisits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery9 as (
+SELECT * FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "3" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS addToCartVisits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery10 as (
+SELECT * FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "5" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS checkoutVisits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery11 as (
+SELECT * FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, visitid
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "6" group by 1,2,3 order by 2 
+)
+PIVOT
+(
+  count(distinct visitid) AS purchaseVisits
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+),
+
+subquery12 as(
+SELECT fullvisitorid,
+IFNULL(totaltransactionrevenue_Referral, 0) as totaltransactionrevenue_Referral
+,IFNULL(totaltransactionrevenue_Organic_Search, 0) as totaltransactionrevenue_Organic_Search
+,IFNULL(totaltransactionrevenue_Affiliates, 0) as totaltransactionrevenue_Affiliates
+,IFNULL(totaltransactionrevenue_Direct, 0) as totaltransactionrevenue_Direct
+,IFNULL(totaltransactionrevenue_Social, 0) as totaltransactionrevenue_Social
+,IFNULL(totaltransactionrevenue_Paid_Search, 0) as totaltransactionrevenue_Paid_Search
+,IFNULL(totaltransactionrevenue_Display, 0) as totaltransactionrevenue_Display
+
+,IFNULL(productQuantity_Referral, 0) as productQuantity_Referral
+,IFNULL(productQuantity_Organic_Search, 0) as productQuantity_Organic_Search
+,IFNULL(productQuantity_Affiliates, 0) as productQuantity_Affiliates
+,IFNULL(productQuantity_Direct, 0) as productQuantity_Direct
+,IFNULL(productQuantity_Social, 0) as productQuantity_Social
+,IFNULL(productQuantity_Paid_Search, 0) as productQuantity_Paid_Search
+,IFNULL(productQuantity_Display, 0) as productQuantity_Display
+
+FROM
+(
+SELECT distinct
+fullvisitorid,case when channelGrouping like "Organic Search" then "Organic_Search" when channelGrouping like "Paid Search" then "Paid_Search" else channelGrouping end as channelGrouping, totals.totaltransactionrevenue, productQuantity
+FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`, UNNEST(hits) hits, UNNEST (hits.product) product
+WHERE cast(date as string) like "%20170103%" and hits.eCommerceAction.action_type = "6" group by 1,2,3,4 
+order by 2 
+)
+PIVOT
+(
+  sum( totaltransactionrevenue/1000000) AS totaltransactionrevenue, sum( productQuantity) AS productQuantity
+  FOR channelGrouping in ('Referral', 'Organic_Search', 'Affiliates', 'Direct','Social','Paid_Search','Display')
+) order by fullvisitorid
+)
+
+SELECT subquery1.*,
+subquery2.first_touch_channel,
+subquery3.last_touch_channel,
+subquery4.first_channel_entrancepagePath,subquery4.first_channel_entrancepageTitle,
+subquery5.last_channel_entrancepagePath,subquery5.last_channel_entrancepageTitle,
+first_touch_channel_pv,last_touch_channel_pv,
+subquery6.visits_Referral,  subquery6.visits_Organic_Search,  subquery6.visits_Direct,  subquery6.visits_Social,  subquery6.visits_Paid_Search, subquery6.visits_Display, subquery6.visits_Affiliates,
+
+subquery7.productPageVisits_Referral, subquery7.productPageVisits_Organic_Search, subquery7.productPageVisits_Affiliates, subquery7.productPageVisits_Direct, subquery7.productPageVisits_Social, subquery7.productPageVisits_Paid_Search,  subquery7.productPageVisits_Display, 
+
+subquery8.productDetailsVisits_Referral,  subquery8.productDetailsVisits_Organic_Search,  subquery8.productDetailsVisits_Affiliates,  subquery8.productDetailsVisits_Direct,  subquery8.productDetailsVisits_Social,  subquery8.productDetailsVisits_Paid_Search, subquery8.productDetailsVisits_Display, 
+
+subquery9.addToCartVisits_Referral, subquery9.addToCartVisits_Organic_Search, subquery9.addToCartVisits_Affiliates, subquery9.addToCartVisits_Direct, subquery9.addToCartVisits_Social, subquery9.addToCartVisits_Paid_Search,  subquery9.addToCartVisits_Display,
+
+subquery10.checkoutVisits_Referral, subquery10.checkoutVisits_Organic_Search, subquery10.checkoutVisits_Affiliates, subquery10.checkoutVisits_Direct, subquery10.checkoutVisits_Social, subquery10.checkoutVisits_Paid_Search,  subquery10.checkoutVisits_Display,
+
+subquery11.purchaseVisits_Referral, subquery11.purchaseVisits_Organic_Search, subquery11.purchaseVisits_Affiliates, subquery11.purchaseVisits_Direct, subquery11.purchaseVisits_Social, subquery11.purchaseVisits_Paid_Search,  subquery11.purchaseVisits_Display,
+
+subquery12.totaltransactionrevenue_Referral,  subquery12.totaltransactionrevenue_Organic_Search,  subquery12.totaltransactionrevenue_Affiliates,  subquery12.totaltransactionrevenue_Direct,  subquery12.totaltransactionrevenue_Social,  subquery12.totaltransactionrevenue_Paid_Search, subquery12.totaltransactionrevenue_Display,
+
+subquery12.productQuantity_Referral,  subquery12.productQuantity_Organic_Search,  subquery12.productQuantity_Affiliates,  subquery12.productQuantity_Direct,  subquery12.productQuantity_Social,  subquery12.productQuantity_Paid_Search, subquery12.productQuantity_Display,
+from subquery1 
+left join subquery2 on subquery1.fullvisitorid=subquery2.fullvisitorid
+left join subquery3 on subquery1.fullvisitorid=subquery3.fullvisitorid
+left join subquery4 on subquery1.fullvisitorid=subquery4.fullvisitorid
+left join subquery5 on subquery1.fullvisitorid=subquery5.fullvisitorid
+left join subquery6 on subquery1.fullvisitorid=subquery6.fullvisitorid
+left join subquery7 on subquery1.fullvisitorid=subquery7.fullvisitorid
+left join subquery8 on subquery1.fullvisitorid=subquery8.fullvisitorid
+left join subquery9 on subquery1.fullvisitorid=subquery9.fullvisitorid
+left join subquery10 on subquery1.fullvisitorid=subquery10.fullvisitorid
+left join subquery11 on subquery1.fullvisitorid=subquery11.fullvisitorid
+left join subquery12 on subquery1.fullvisitorid=subquery12.fullvisitorid
+
+order by fullvisitorid
+) group by 1, 2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69
+)
